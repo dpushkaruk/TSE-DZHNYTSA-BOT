@@ -1,0 +1,17 @@
+# Public Ukrainian Telegram channels collected by ingest_daily (Telethon).
+# Channels with almost no marked ads are replaced after the Lab 2 count (design.md 5.2).
+channels:
+  - ssternenko
+  - ukrbavovna
+  - lachentyt
+  - kievinfo_kyiv
+  - UaOnlii
+  - k_dvizh
+  - ukraina_novosti
+  - oko_ua
+  - kievreal1
+  - u_now
+  - voynareal
+  - insiderUKR
+  - truexanewsua
+  - kyivoperat
