@@ -1,0 +1,5 @@
+# quality_check thresholds for one day of posts (design.md 6.6, check 2)
+min_rows: 50            # clean posts in the day, all channels together
+min_channels: 5         # channels with at least one post
+max_empty_text_share: 0.7   # raw posts without text (photos, albums) may be many, but not all
+max_ad_share: 0.5       # marked ads among clean posts

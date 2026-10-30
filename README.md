@@ -50,8 +50,8 @@ make reproduce         # rebuild champion from its commit and data version
 
 | Run of 2026-09-10 | posts_clean | features |
 |---|---|---|
-| first | TODO | TODO |
-| second (`make rerun`) | TODO | TODO |
+| first | 760 | 760 |
+| second (`make rerun`) | 760 | 760 |
 
 **Quality gate.** `make bad-batch` feeds `tests/fixtures/bad_batch`: 6 channels whose 60 posts all lost their text (a broken export). `validate` passes (schema is fine), `quality_check` fails: `0 clean rows < 50; 0 channels < 5; empty-text share 1.00 > 0.7`. Thresholds in `configs/quality.yaml`. Screenshots: `docs/screenshots/failed.png`, `docs/screenshots/success.png`.
 
