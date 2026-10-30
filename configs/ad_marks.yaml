@@ -1,0 +1,11 @@
+# Regexes for the channel's own ad mark (case-insensitive). A match means label `ad`;
+# the matched text is cut out before training so the model cannot just read the mark.
+# Not a mark: a bare "Реклама" link in a channel footer ("Підписатися | ... | Реклама").
+patterns:
+  - '#\s*реклама'
+  - '#\s*промо'
+  - '#\s*партнерськ\w*'
+  - '#\s*ad\b'
+  - 'на\s+правах\s+реклами'
+  - 'партнерськ\w*\s+(матеріал|публікаці\w*|пост)'
+  - 'рекламн\w*\s+(матеріал|публікаці\w*|пост)'

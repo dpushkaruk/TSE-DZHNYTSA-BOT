@@ -1,0 +1,75 @@
+# Local stack for Lab 2: `make up`. Passwords are local defaults; override in .env.
+x-s3-env: &s3-env
+  AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minio}
+  AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minio12345}
+  MLFLOW_S3_ENDPOINT_URL: http://minio:9000
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-dzhynsa}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-dzhynsa}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./docker/postgres-init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ports: ["5432:5432"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-dzhynsa}"]
+      interval: 5s
+      retries: 20
+
+  minio:
+    image: pgsty/silo:RELEASE.2026-09-16T00-00-00Z
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minio}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minio12345}
+    volumes: [miniodata:/data]
+    ports: ["9000:9000", "9001:9001"]
+    healthcheck:
+      test: ["CMD", "curl", "-fs", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      retries: 20
+
+  buckets:
+    image: amazon/aws-cli:2.27.0
+    depends_on:
+      minio: {condition: service_healthy}
+    environment: *s3-env
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - for b in dvc mlflow; do aws --endpoint-url http://minio:9000 s3 mb s3://$$b || true; done
+
+  mlflow:
+    build: {context: ., dockerfile: docker/mlflow.Dockerfile}
+    depends_on:
+      postgres: {condition: service_healthy}
+      buckets: {condition: service_completed_successfully}
+    environment: *s3-env
+    command: >
+      mlflow server --host 0.0.0.0 --port 5000
+      --backend-store-uri postgresql+psycopg2://${POSTGRES_USER:-dzhynsa}:${POSTGRES_PASSWORD:-dzhynsa}@postgres:5432/mlflow
+      --artifacts-destination s3://mlflow --serve-artifacts
+      --allowed-hosts "*"
+    ports: ["5000:5000"]
+
+  airflow:
+    build: {context: ., dockerfile: docker/airflow.Dockerfile}
+    depends_on:
+      postgres: {condition: service_healthy}
+    command: standalone
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER:-dzhynsa}:${POSTGRES_PASSWORD:-dzhynsa}@postgres:5432/airflow
+      AIRFLOW__CORE__DAGS_FOLDER: /opt/project/dags
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_ALL_ADMINS: "true"
+      PYTHONPATH: /opt/project/src
+      WAREHOUSE_URL: postgresql+psycopg2://${POSTGRES_USER:-dzhynsa}:${POSTGRES_PASSWORD:-dzhynsa}@postgres:5432/warehouse
+    volumes: [./:/opt/project]
+    ports: ["8080:8080"]
+
+volumes:
+  pgdata:
+  miniodata:
