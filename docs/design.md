@@ -272,12 +272,14 @@ AWS on-demand list prices, us-east-1, 730 h/month (Assumption: re-check in the A
 
 ### 7.2 Experiment results
 
-Test 2026-10-01..27, MLflow experiment `dzhynsa-lab2`. Filled after the real backfill (Assumption until then).
+Test 2026-10-01..27, MLflow experiment `dzhynsa-lab2`. Data: 14 channels, 2026-06-01..10-27, 113,761 posts (85,367 with text, 483 marked ads), DVC `data_version` `7cb3535292c351068d6c6da584d5a45b.dir`. Train Jun-Aug, val Sep, test Oct.
 
 | Model | PR-AUC | Precision | Recall | F1 |
 |---|---|---|---|---|
-| Hand rule | | | | |
-| TF-IDF + LR | | | | |
+| Hand rule | 0.005 | 0.005 | 0.758 | 0.010 |
+| TF-IDF + LR | **0.749** | **0.644** | **0.684** | **0.663** |
+
+The rule finds most ads but flags almost everything, so its precision is near zero; TF-IDF + LR is the Lab 2 baseline. Registered as `dzhynsa-tfidf` v1 `@champion` (run `cb943c6c63924ddcb6fce4ae2f2c1066`, commit `373da4c`). Reproduction from that commit and data version gave PR-AUC 0.7494 vs 0.7494 (diff 0.0000, tolerance 0.01).
 
 ### 7.3 Performance benchmarks
 
