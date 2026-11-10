@@ -159,7 +159,12 @@ def main() -> None:
         model_scores = scores(test["label_ad"], prob >= thr, prob)
         mlflow.log_params({k: str(v) for k, v in PARAMS.items()} | sizes | {"threshold": thr})
         mlflow.log_metrics({f"test_{k}": v for k, v in model_scores.items()} | ad_share)
-        info = mlflow.sklearn.log_model(model, name="model", input_example=test.head(3), serialization_format="cloudpickle")
+        info = mlflow.sklearn.log_model(
+            model,
+            name="model",
+            input_example=test.head(3),
+            serialization_format="cloudpickle",
+        )
 
     if args.register:
         mv = mlflow.register_model(info.model_uri, MODEL_NAME)
