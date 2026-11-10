@@ -1,7 +1,7 @@
 # TSE_DZHYNSA_BOT
 
 Some posts in Ukrainian Telegram news channels are paid placements published without the advertising mark ("джинса").
-This project collects new posts from 15 public Ukrainian channels once a day with Telethon.
+This project collects new posts from 14 public Ukrainian channels once a day with Telethon.
 Posts the channels mark as ads become free training labels: the mark is removed and a model learns what an ad looks like.
 Every post is then classified as `ad`, `regular` or `dzhynsa` (unmarked, but the model says it reads like an ad), first with a TF-IDF baseline and later with a local LLM that sees similar posts.
 The owner reviews the top-20 suspects weekly, and in Lab 5 a Telegram bot agent answers questions about which channels publish hidden ads.
@@ -42,7 +42,9 @@ make train             # rule vs TF-IDF + LR, logged and registered as champion
 make reproduce         # rebuild champion from its commit and data version
 ```
 
-**Data.** 14 public channels (`configs/channels.yaml`), posts 2026-06-01..2026-10-27, collected by `make backfill` with the owner's Telegram account. One file per channel and Kyiv day: `data/raw/<channel>/<YYYY-MM-DD>.jsonl.gz`. DVC remote: S3 (MinIO, `s3://dvc`, endpoint `http://localhost:9000`), config in `.dvc/config`, keys in `.env`. Size: TODO MB (no sampling needed below 200 MB). Checksum after `make pull`: `data/raw.dvc` md5 `TODO`.
+Without `make` (e.g. Windows PowerShell), run the Python steps as `uv run --env-file .env python -m tse_dzhynsa_bot.train --register` and `uv run --env-file .env python -m tse_dzhynsa_bot.reproduce --alias champion`. `--env-file .env` is required: it sets `MLFLOW_TRACKING_URI` and the MinIO keys (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`); without it MLflow logs to a local sqlite file. The model is saved with `cloudpickle` (skops serialization hung).
+
+**Data.** 14 public channels (`configs/channels.yaml`), posts 2026-06-01..2026-10-27, collected by `make backfill` with the owner's Telegram account. One file per channel and Kyiv day: `data/raw/<channel>/<YYYY-MM-DD>.jsonl.gz`. DVC remote: S3 (MinIO, `s3://dvc`, endpoint `http://localhost:9000`), config in `.dvc/config`, keys in `.env`. 113,761 posts (85,367 with text), 483 of them marked as ads; 2,086 files, 17.8 MB (no sampling needed below 200 MB). Checksum after `make pull`: `data/raw.dvc` md5 `7cb3535292c351068d6c6da584d5a45b.dir` (= `data_version` in MLflow).
 
 **Batch.** `ingest_daily` uses `CronDataIntervalTimetable("@daily", timezone="Europe/Kyiv")`. The batch is the run's logical date (= data interval start) as a Kyiv day, never the current time, so manual runs and backfills pick the same day. The DAG reads files, not Telegram, so it runs without Telegram keys.
 
@@ -59,7 +61,9 @@ make reproduce         # rebuild champion from its commit and data version
 
 | Model | PR-AUC | Precision | Recall | F1 |
 |---|---|---|---|---|
-| Hand rule (`rule.py`) | TODO | TODO | TODO | TODO |
-| TF-IDF + LR (`train.py`) | TODO | TODO | TODO | TODO |
+| Hand rule (`rule.py`) | 0.005 | 0.005 | 0.758 | 0.010 |
+| TF-IDF + LR (`train.py`) | **0.749** | **0.644** | **0.684** | **0.663** |
 
 **Reproduction.** `make reproduce` reads `git_commit` and `data_version` from `dzhynsa-tfidf@champion`, checks the commit out in `.repro/`, runs `dvc pull`, retrains and fails if test PR-AUC differs by more than **0.01** (covers thread and BLAS differences; the split and seeds are fixed).
+
+**Result.** MLflow experiment `dzhynsa-lab2`, model `dzhynsa-tfidf` v1 `@champion`, run `cb943c6c63924ddcb6fce4ae2f2c1066`, `git_commit` `373da4c`, `data_version` `7cb3535292c351068d6c6da584d5a45b.dir`. `make reproduce`: `reproduced pr_auc 0.7494, registered 0.7494, diff 0.0000, tol 0.01` (pass).

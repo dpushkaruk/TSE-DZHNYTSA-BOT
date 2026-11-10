@@ -1,9 +1,10 @@
 """ingest_daily: one Kyiv day of posts, from the raw files to the feature table.
 
 The batch is the run's logical date (= data interval start), never the current time.
-Raw files come from data/raw (pulled with `dvc pull`, filled by the Telethon
-collector), so a reviewer can run any day without Telegram keys. Every load replaces
-its day: safe to rerun.
+The first task, collect, downloads that day from Telegram into data/raw (Telethon,
+keys and collector.session from the mounted project). Without keys, or with
+collect=False / another raw_dir (e.g. the bad-batch fixture), it is skipped and the DAG
+reads the files already in data/raw (`dvc pull`). Every load replaces its day: safe to rerun.
 """
 
 from datetime import timedelta
@@ -34,11 +35,47 @@ def staging(day, name):
     start_date=pendulum.datetime(2026, 1, 1, tz="Europe/Kyiv"),
     catchup=False,
     max_active_runs=1,
-    params={"raw_dir": str(PROJECT / "data" / "raw")},
+    params={"raw_dir": str(PROJECT / "data" / "raw"), "collect": True},
     default_args={"retries": 0},
     tags=["lab2"],
 )
 def ingest_daily():
+    # one collect at a time: a Telegram account should not run parallel sessions
+    @task(max_active_tis_per_dag=1, retries=2, retry_delay=timedelta(minutes=1))
+    def collect() -> None:
+        import asyncio
+        import os
+        import shutil
+        import tempfile
+
+        import yaml
+        from dotenv import load_dotenv
+
+        from tse_dzhynsa_bot.collect import collect as collect_days
+
+        day = batch_day()
+        params = get_current_context()["params"]
+        raw_dir = Path(params["raw_dir"])
+        load_dotenv(PROJECT / ".env")
+        if not params["collect"] or raw_dir != PROJECT / "data" / "raw":
+            print(f"collect {day}: skipped (collect={params['collect']}, raw_dir={raw_dir})")
+            return
+        if not os.environ.get("TG_API_ID"):
+            print(f"collect {day}: skipped, no TG_API_ID in .env; using files in {raw_dir}")
+            return
+        cfg = yaml.safe_load((PROJECT / "configs" / "channels.yaml").read_text(encoding="utf-8"))
+        # SQLite locking is unreliable on a Windows bind mount, so the task works on a
+        # private copy of the session file (Telethon adds the .session suffix)
+        tmp = Path(tempfile.mkdtemp()) / "collector"
+        src = PROJECT / (os.environ.get("TG_SESSION", "collector") + ".session")
+        shutil.copy(src, tmp.with_suffix(".session"))
+        os.environ["TG_SESSION"] = str(tmp)
+        try:
+            counts = asyncio.run(collect_days(cfg["channels"], day, day, raw_dir))
+        finally:
+            shutil.rmtree(tmp.parent, ignore_errors=True)
+        print(f"collect {day}: {sum(counts.values())} posts from {len(counts)} channels")
+
     @task
     def extract() -> int:
         from tse_dzhynsa_bot.features import read_raw_day
@@ -137,12 +174,13 @@ def ingest_daily():
         if errors:
             raise ValueError("quality gate failed: " + "; ".join(errors))
 
+    c = collect()
     raw = extract()
     v = validate()
     t = transform()
     ld = load()
     f = build_features()
-    raw >> v >> t >> ld >> f
+    c >> raw >> v >> t >> ld >> f
     quality_check(raw, t, ld, f)
 
 
