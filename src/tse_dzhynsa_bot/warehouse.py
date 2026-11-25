@@ -8,7 +8,7 @@ import pandas as pd
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
 
-from tse_dzhynsa_bot.features import FEATURE_COLUMNS
+from tse_dzhynsa_bot.features import FEATURE_COLUMNS, FEATURE_VERSION
 
 DDL = f"""
 CREATE TABLE IF NOT EXISTS posts_clean (
@@ -25,11 +25,21 @@ CREATE TABLE IF NOT EXISTS features (
     PRIMARY KEY (channel, id, feature_version)
 );
 CREATE INDEX IF NOT EXISTS features_day ON features (day, feature_version);
+CREATE TABLE IF NOT EXISTS predictions (
+    channel TEXT NOT NULL, id BIGINT NOT NULL, day DATE NOT NULL, p_ad DOUBLE PRECISION NOT NULL,
+    label_ad SMALLINT NOT NULL, verdict TEXT NOT NULL, model_version TEXT NOT NULL,
+    threshold DOUBLE PRECISION NOT NULL, feature_version TEXT NOT NULL,
+    scored_at TIMESTAMPTZ NOT NULL, PRIMARY KEY (channel, id, model_version)
+);
+CREATE INDEX IF NOT EXISTS predictions_day ON predictions (day, verdict);
 """
 
 
+LOCAL_URL = "postgresql+psycopg2://dzhynsa:dzhynsa@localhost:5432/warehouse"
+
+
 def engine() -> Engine:
-    return create_engine(os.environ["WAREHOUSE_URL"])
+    return create_engine(os.environ.get("WAREHOUSE_URL", LOCAL_URL))
 
 
 def init(eng: Engine) -> None:
@@ -53,6 +63,22 @@ def read_clean(eng: Engine, start: date, end: date) -> pd.DataFrame:
     df["ts"] = pd.to_datetime(df["ts"], utc=True).dt.tz_convert("Europe/Kyiv")
     df["links"] = df["links"].map(lambda v: v if isinstance(v, list) else [])
     return df
+
+
+def read_features(eng: Engine, day: date, version: str = FEATURE_VERSION) -> pd.DataFrame:
+    q = text("SELECT * FROM features WHERE day = :d AND feature_version = :v")
+    return pd.read_sql(q, eng, params={"d": day, "v": version})
+
+
+def channel_ad_rate(eng: Engine, channel: str, day: date, window_days: int = 30) -> float:
+    """Same as features.add_channel_ad_rate for one channel: marked-ad share over the
+    `window_days` days before `day` (the day itself excluded)."""
+    q = text(
+        "SELECT coalesce(avg(label_ad), 0) FROM posts_clean "
+        "WHERE channel = :c AND day >= CAST(:d AS date) - :w AND day < :d"
+    )
+    with eng.connect() as con:
+        return float(con.execute(q, {"c": channel, "d": day, "w": window_days}).scalar_one())
 
 
 def count(eng: Engine, sql: str, **params) -> int:

@@ -66,4 +66,4 @@ Without `make` (e.g. Windows PowerShell), run the Python steps as `uv run --env-
 
 **Reproduction.** `make reproduce` reads `git_commit` and `data_version` from `dzhynsa-tfidf@champion`, checks the commit out in `.repro/`, runs `dvc pull`, retrains and fails if test PR-AUC differs by more than **0.01** (covers thread and BLAS differences; the split and seeds are fixed).
 
-**Result.** MLflow experiment `dzhynsa-lab2`, model `dzhynsa-tfidf` v1 `@champion`, run `cb943c6c63924ddcb6fce4ae2f2c1066`, `git_commit` `373da4c`, `data_version` `7cb3535292c351068d6c6da584d5a45b.dir`. `make reproduce`: `reproduced pr_auc 0.7494, registered 0.7494, diff 0.0000, tol 0.01` (pass).
+**Result.** MLflow experiment `dzhynsa-lab2`, model `dzhynsa-tfidf` v1 `@champion` (run, `git_commit` and `data_version` are stored as tags of the registered version). `make reproduce`: `reproduced pr_auc 0.7494, registered 0.7494, diff 0.0000, tol 0.01` (pass).

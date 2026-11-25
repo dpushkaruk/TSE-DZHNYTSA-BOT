@@ -89,7 +89,7 @@ Model targets are assumptions until the first baseline run in Lab 2.
 | Data version | DVC md5 of `data/raw` (in `data/raw.dvc`), remote MinIO `s3://dvc`; logged as `data_version` on every MLflow run. |
 | Split | Train 2026-06..08, validation 2026-09, test 2026-10-01..27; live from 2026-10-28. |
 | Formats | Raw JSONL.gz (DVC → MinIO); clean posts in PostgreSQL `posts_clean`, features in `features` (one row per post and `feature_version`); predictions, reviews and full-text index in PostgreSQL. |
-| Training vs serving | Training: full history, labels, point-in-time channel stats. Serving: the new post (mark removed) and online features, no labels. |
+| Training vs serving | Training: full history, labels, point-in-time channel stats from the Feast offline store. Serving: the new post (mark removed) plus `channel_stats` from the Feast online store, no labels. |
 
 | Label | Source | Delay | Use |
 |---|---|---|---|
@@ -114,12 +114,12 @@ All models are compared on the same test month; the best becomes `champion`. Pro
 
 | Feature | Training source | Serving source |
 |---|---|---|
-| `text_clean` (post with the ad mark cut) | `build_features()` on DVC raw | the request text (`/score`) or the new post in `posts_clean`, same function |
-| `n_links`, `has_invite_link`, `has_promo_code`, `has_phone`, `text_len`, `is_forward`, `hour_of_day` | same function on the raw post | the request itself; regexes in code, version = `feature_version` |
-| `channel_ad_rate_30d` (share of marked ads in the channel's previous 30 days, today excluded) | rolling window over DVC raw, point-in-time | warehouse lookup: `features` row written by `ingest_daily.build_features` for that day |
+| `text_clean` (post with the ad mark cut) | Feast `post_features` (warehouse `features`), or `build_features()` on DVC raw | the request text (`/score`) or the new post in `posts_clean`, same function |
+| `n_links`, `has_invite_link`, `has_promo_code`, `has_phone`, `text_len`, `is_forward`, `hour_of_day` | Feast `post_features` (same function wrote them) | `post_level_features()` on the request itself; regexes in code, version = `feature_version` |
+| `channel_ad_rate_30d` (share of marked ads in the channel's previous 30 days, today excluded) | Feast `channel_stats`, point-in-time join on the post time | Feast online store (`feast_online` schema), materialized by `ingest_daily` for each day |
 | `search_index` (LLM retrieval only, Lab 3) | clean text | PostgreSQL full-text index, updated daily |
 
-Training and the DAG call the same `features.py`, so the only training-serving difference is where the 30-day history is read from (DVC files vs `posts_clean`).
+Training and the DAG call the same `features.py`. Feast (`feature_repo/`) sits on top of the `features` table: entities `channel` and `post` (`post_id`), feature views `post_features` (offline only) and `channel_stats` (offline + online), feature service `dzhynsa_v1`. `train.py --source feast` reads the training set with `get_historical_features` (point-in-time: a post sees only the channel rate known at its own time); `scorer` computes the post features from the request and reads `channel_ad_rate_30d` with `get_online_features`. The Feast training set matches the one rebuilt from DVC raw, column by column (checked on synthetic data).
 
 ### 5.4 Experimentation and validation
 
@@ -155,7 +155,8 @@ The diagrams use the component names of 6.2. Orange marks on the data flow: vers
 | MinIO | `pgsty/silo:RELEASE.2026-09-16T00-00-00Z` | raw, Parquet, DVC remote, MLflow artifacts | Lab 2 | Amazon S3 |
 | DVC | 3.67.1 + dvc-s3 3.3.0 | versions of raw data and labels | Lab 2 | S3 remote |
 | PostgreSQL | 16, built-in full-text search | databases `warehouse` (`posts_clean`, `features`, later predictions, reviews, search index), `airflow`, `mlflow` | Lab 2 | Amazon RDS |
-| Airflow | 3.3.1, LocalExecutor | `ingest_daily`: extract → validate → transform → load → build_features → quality_check (Lab 2; scoring added in Lab 4); later `train_monthly`, `review_weekly`, `monitor_weekly` | Lab 2 | Amazon MWAA |
+| Airflow | 3.3.1, LocalExecutor | `ingest_daily`: collect → extract → validate → transform → load → build_features → quality_check → materialize (Feast online) (Lab 2; scoring added in Lab 4); later `train_monthly`, `review_weekly`, `monitor_weekly` | Lab 2 | Amazon MWAA |
+| Feast | 0.66.0, offline store and online store = PostgreSQL `warehouse` (schema `feast_online`), file registry `feature_repo/data/registry.db` | point-in-time training sets, online `channel_stats` for `scorer` | Lab 2 | SageMaker Feature Store |
 | MLflow | 3.16.1, backend PostgreSQL, artifacts MinIO `s3://mlflow` (proxied by the server) | runs, metrics, registry (`dzhynsa-tfidf@champion`) | Lab 2 | SageMaker with MLflow |
 | Ollama | Qwen3-4B Q4 on CPU (1.7B compared in Lab 3) | LLM classifier (Lab 3), agent's LLM (Lab 5) | Lab 3 | Amazon Bedrock |
 | scorer | FastAPI image | `/score`, `/search`, `/stats` | Lab 2 task, Lab 4 service | EKS + ECR |
@@ -235,7 +236,7 @@ AWS on-demand list prices, us-east-1, 730 h/month (Assumption: re-check in the A
 |---|---|
 | Telegram channels (upstream) | post fields as in 5.2; no SLA; FloodWait limits |
 | Collector → pipeline | one JSONL.gz per channel and day with `channel`, `id`, `date`, `text` required; `validate` fails on a missing column, `quality_check` on too few rows or channels, too many empty texts, ad share > 0.5 (`configs/quality.yaml`) |
-| Pipeline → training and `scorer` | `features` table keyed by (`channel`, `id`, `feature_version`); MLflow model `dzhynsa-tfidf@champion` with tags `data_version`, `git_commit`, `threshold` |
+| Pipeline → training and `scorer` | `features` table keyed by (`channel`, `id`, `feature_version`), read through Feast feature service `dzhynsa_v1`; MLflow model `dzhynsa-tfidf@champion` with tags `data_version`, `git_commit`, `threshold` |
 | Weekly review (labels) | 20 posts/week, yes/no, stored with threshold and model version |
 | Lab 5 agent (downstream) | `/v1/score {text}` → `{class, p_ad, reason}`; `/v1/search?q=&channel=` → posts with `t.me` links; `/v1/stats?channel=&period=` → counts per class |
 | Alerts (downstream) | Telegram message: signal, value, threshold, link to the report |
@@ -267,7 +268,6 @@ AWS on-demand list prices, us-east-1, 730 h/month (Assumption: re-check in the A
 | TF-IDF as the only model | misses new phrasings; kept as baseline and fallback |
 | Russian channels (legal `erid` mark) | clean labels, but not the owner's market |
 | e5 embeddings + pgvector | extra model and service, harder to explain; BM25 in PostgreSQL instead |
-| Feast | a service for a handful of features |
 | vLLM | needs a GPU; Ollama runs on CPU |
 
 ### 7.2 Experiment results
@@ -279,7 +279,7 @@ Test 2026-10-01..27, MLflow experiment `dzhynsa-lab2`. Data: 14 channels, 2026-0
 | Hand rule | 0.005 | 0.005 | 0.758 | 0.010 |
 | TF-IDF + LR | **0.749** | **0.644** | **0.684** | **0.663** |
 
-The rule finds most ads but flags almost everything, so its precision is near zero; TF-IDF + LR is the Lab 2 baseline. Registered as `dzhynsa-tfidf` v1 `@champion` (run `cb943c6c63924ddcb6fce4ae2f2c1066`, commit `373da4c`). Reproduction from that commit and data version gave PR-AUC 0.7494 vs 0.7494 (diff 0.0000, tolerance 0.01).
+The rule finds most ads but flags almost everything, so its precision is near zero; TF-IDF + LR is the Lab 2 baseline. Registered as `dzhynsa-tfidf` v1 `@champion` (run id, git commit and data version are kept as MLflow tags). Reproduction from that commit and data version gave PR-AUC 0.7494 vs 0.7494 (diff 0.0000, tolerance 0.01).
 
 ### 7.3 Performance benchmarks
 

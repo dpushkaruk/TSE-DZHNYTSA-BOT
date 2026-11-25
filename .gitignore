@@ -7,3 +7,17 @@ __pycache__/
 *.session
 *.session-journal
 .repro/
+
+# secrets
+.env.*
+!.env.example
+
+# MLflow local store (server keeps runs in Postgres + MinIO)
+mlflow.db
+mlruns/
+mlartifacts/
+
+# local artifacts
+*.db
+*.pkl
+feature_repo/data/

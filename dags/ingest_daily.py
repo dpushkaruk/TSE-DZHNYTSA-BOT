@@ -174,6 +174,29 @@ def ingest_daily():
         if errors:
             raise ValueError("quality gate failed: " + "; ".join(errors))
 
+    @task(retries=2, retry_delay=timedelta(minutes=1))
+    def predict() -> None:
+        """Score the day with the champion: POST to the scoring API (api service), which
+        writes the `predictions` table. Runs only after quality_check passed."""
+        import json
+        import os
+        import urllib.request
+
+        url = os.environ.get("SCORING_URL", "http://api:8000") + "/predict-day"
+        body = json.dumps({"day": batch_day().isoformat()}).encode()
+        req = urllib.request.Request(url, body, {"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=900) as resp:
+            print(f"predict: {json.loads(resp.read())}")
+
+    @task
+    def materialize() -> None:
+        # Feast online store: the day's channel_stats (channel_ad_rate_30d) for serving
+        from tse_dzhynsa_bot.feast_store import materialize as feast_materialize
+
+        day = batch_day()
+        feast_materialize(day, day)
+        print(f"materialize {day}: channel_stats -> Feast online store")
+
     c = collect()
     raw = extract()
     v = validate()
@@ -181,7 +204,7 @@ def ingest_daily():
     ld = load()
     f = build_features()
     c >> raw >> v >> t >> ld >> f
-    quality_check(raw, t, ld, f)
+    quality_check(raw, t, ld, f) >> materialize() >> predict()
 
 
 ingest_daily()

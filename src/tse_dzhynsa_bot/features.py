@@ -24,6 +24,10 @@ FEATURE_COLUMNS = [
     "hour_of_day",
     "channel_ad_rate_30d",
 ]
+# computed from the post itself, at training and at serving time
+POST_FEATURE_COLUMNS = FEATURE_COLUMNS[:-1]
+# needs the channel's history: point-in-time from Feast offline, latest from Feast online
+CHANNEL_FEATURE_COLUMNS = ["channel_ad_rate_30d"]
 
 PROMO_RE = re.compile(r"промокод|promo\s?code|знижк\w*\s+\d+\s?%", re.IGNORECASE)
 PHONE_RE = re.compile(r"(?:\+?38)?\s?\(?0\d{2}\)?[\s-]?\d{3}[\s-]?\d{2}[\s-]?\d{2}")
@@ -94,9 +98,9 @@ def add_channel_ad_rate(clean_df: pd.DataFrame, window_days: int = 30) -> pd.Ser
     return merged["rate"].fillna(0.0).astype(float)
 
 
-def build_features(clean_df: pd.DataFrame) -> pd.DataFrame:
-    """One row per post. Text with the mark removed is the main feature;
-    the rest are small numeric signals known at serving time."""
+def post_level_features(clean_df: pd.DataFrame) -> pd.DataFrame:
+    """Features known from the post alone (no history): used as is when serving a new post.
+    Needs the clean-row columns channel, id, ts, text_clean, links, forward_from."""
     df = clean_df.copy()
     text = df["text_clean"]
     df["link_domains"] = df["links"].map(_domains)
@@ -110,6 +114,13 @@ def build_features(clean_df: pd.DataFrame) -> pd.DataFrame:
     df["text_len"] = text.str.len().astype(int)
     df["is_forward"] = df["forward_from"].notna().astype(int)
     df["hour_of_day"] = df["ts"].dt.hour.astype(int)
+    return df
+
+
+def build_features(clean_df: pd.DataFrame) -> pd.DataFrame:
+    """One row per post. Text with the mark removed is the main feature;
+    the rest are small numeric signals known at serving time."""
+    df = post_level_features(clean_df)
     df["channel_ad_rate_30d"] = add_channel_ad_rate(df)
     df["feature_version"] = FEATURE_VERSION
     keep = ["channel", "id", "day", "ts", "text_clean", "link_domains", "label_ad"]

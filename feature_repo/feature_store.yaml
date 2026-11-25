@@ -1,0 +1,26 @@
+# Feast feature store over the PostgreSQL warehouse (design.md 6.2).
+# Offline store = the `features` table (point-in-time joins for training);
+# online store = schema `feast_online` in the same database (latest values for serving).
+# ${...} come from .env (host: localhost) or docker-compose (Airflow: postgres).
+project: dzhynsa
+provider: local
+registry: data/registry.db
+offline_store:
+  type: postgres
+  host: ${FEAST_PG_HOST}
+  port: 5432
+  database: warehouse
+  db_schema: public
+  user: ${POSTGRES_USER}
+  password: ${POSTGRES_PASSWORD}
+  sslmode: disable  # the local postgres:16 container has no TLS
+online_store:
+  type: postgres
+  host: ${FEAST_PG_HOST}
+  port: 5432
+  database: warehouse
+  db_schema: feast_online
+  user: ${POSTGRES_USER}
+  password: ${POSTGRES_PASSWORD}
+  sslmode: disable  # the local postgres:16 container has no TLS
+entity_key_serialization_version: 3

@@ -2,6 +2,7 @@
 log both runs to MLflow with lineage tags, and register the model as `champion`.
 
     uv run python -m tse_dzhynsa_bot.train --register
+    uv run --env-file .env python -m tse_dzhynsa_bot.train --source feast   # features via Feast
 """
 
 import argparse
@@ -65,6 +66,13 @@ def load_dataset(raw_dir: Path) -> pd.DataFrame:
     return build_features(clean(raw))
 
 
+def load_dataset_feast() -> pd.DataFrame:
+    """The same rows from the warehouse through Feast (point-in-time join)."""
+    from tse_dzhynsa_bot.feast_store import training_frame
+
+    return training_frame(SPLIT["train"][0], SPLIT["test"][1])
+
+
 def split(df: pd.DataFrame) -> dict[str, pd.DataFrame]:
     return {k: df[(df["day"] >= s) & (df["day"] <= e)] for k, (s, e) in SPLIT.items()}
 
@@ -126,16 +134,24 @@ def main() -> None:
     ap.add_argument("--raw", type=Path, default=ROOT / "data" / "raw")
     ap.add_argument("--register", action="store_true", help="register the model as champion")
     ap.add_argument("--reproduces", default="", help="run id this run reproduces")
+    ap.add_argument(
+        "--source",
+        choices=["raw", "feast"],
+        default="raw",
+        help="raw: rebuild features from data/raw; feast: read them from the Feast offline store",
+    )
     args = ap.parse_args()
 
     tags = {
         "data_version": data_version(),
         "git_commit": git_commit(),
         "feature_version": FEATURE_VERSION,
+        "feature_source": args.source,
     }
     if args.reproduces:
         tags["reproduces"] = args.reproduces
-    parts = split(load_dataset(args.raw))
+    data = load_dataset_feast() if args.source == "feast" else load_dataset(args.raw)
+    parts = split(data)
     sizes = {f"n_{k}": len(v) for k, v in parts.items()}
     ad_share = {f"ad_share_{k}": float(v["label_ad"].mean()) for k, v in parts.items()}
     test = parts["test"]

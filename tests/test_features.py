@@ -63,3 +63,12 @@ def test_channel_ad_rate_handles_missing_days():
         }
     )
     assert add_channel_ad_rate(df).tolist() == [0.0, 1.0]
+
+
+def test_post_level_features_match_build_features(raw):
+    from tse_dzhynsa_bot.features import POST_FEATURE_COLUMNS, post_level_features
+
+    c = clean(raw)
+    full = build_features(c)
+    post = post_level_features(c)
+    assert (post[POST_FEATURE_COLUMNS].to_numpy() == full[POST_FEATURE_COLUMNS].to_numpy()).all()
